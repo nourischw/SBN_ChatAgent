@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3030:3030"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - INTERNAL_API_URL=http://host.docker.internal:8000
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - CHROMA_PERSIST_DIR=/app/data/chroma
+      - APP_HOST=0.0.0.0
+      - APP_PORT=3030
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - chatagent-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - chatagent-network
+
+networks:
+  chatagent-network:
+    driver: bridge
