@@ -36,22 +36,34 @@ class RAGEngine:
             persist_directory=persist_dir
         )
 
-        # Initialize LLM
+        # Initialize LLM with optimized settings
         self.llm = Ollama(
             model=self.model_name,
             base_url=self.ollama_host,
-            temperature=0.7
+            temperature=0.3,  # Lower temperature for more factual responses
+            num_ctx=4096,  # Increased context window for better RAG
+            top_p=0.9  # Nucleus sampling for better coherence
         )
 
-        # RAG prompt template
-        self.prompt_template = """You are a helpful business assistant specializing in product information. Use the following context to answer questions about products.
-If you cannot find the answer in the context, use your general knowledge but indicate that the information is not from the provided product catalog.
+        # RAG prompt template with enhanced instructions
+        self.prompt_template = """You are a professional AI product assistant for SBN. Your role is to help users find and understand product information.
 
-Context: {context}
+IMPORTANT INSTRUCTIONS:
+1. Use ONLY the provided context to answer questions about products
+2. If the answer is not in the context, say "I don't have that information in the product catalog" and offer general guidance
+3. Be specific and cite product names, numbers, and prices when available
+4. If asked about categories, list all relevant products from that category
+5. For price comparisons, provide clear comparisons with specific values
+6. Keep responses concise but informative (2-4 sentences unless more detail is requested)
+7. If the user asks about availability, refer to the Quantity (Qty) field
+8. Always be helpful and professional in tone
+
+Previous Conversation (if any):
+{context}
 
 Question: {question}
 
-Answer: """
+Answer:"""
 
         self.prompt = PromptTemplate(
             template=self.prompt_template,
