@@ -13,16 +13,21 @@ from langchain.schema import Document
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 
+try:
+    from .config import settings
+except ImportError:
+    from config import settings
+
 logger = logging.getLogger(__name__)
 
 
 class RAGEngine:
     """RAG Engine using Ollama and ChromaDB"""
 
-    def __init__(self, persist_dir: str = "./data/chroma"):
-        self.persist_dir = persist_dir
-        self.model_name = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
-        self.ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    def __init__(self, persist_dir: str = None):
+        self.persist_dir = persist_dir or settings.chroma_persist_dir
+        self.model_name = settings.ollama_model
+        self.ollama_host = settings.ollama_host
 
         # Initialize embeddings
         self.embeddings = OllamaEmbeddings(

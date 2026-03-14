@@ -19,18 +19,19 @@ try:
     from .conversation_manager import conversation_manager
     from .validators import validate_chat_request, sanitize_text, validate_conversation_id
     from .rate_limiter import RateLimitMiddleware
+    from .config import settings
 except ImportError:
     from models import ChatRequest, ChatResponse, QueryResponse, Product
     from api_client import InternalAPIClient
     from rag_engine import RAGEngine
     from logging_config import setup_logging
     from conversation_manager import conversation_manager
-    from validators import validate_chat_request, sanitize_text
+    from validators import validate_chat_request, sanitize_text, validate_conversation_id
     from rate_limiter import RateLimitMiddleware
+    from config import settings
 
 # Setup logging
-log_level = os.getenv("LOG_LEVEL", "INFO")
-setup_logging(log_level=log_level)
+setup_logging(log_level=settings.log_level)
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
@@ -49,11 +50,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Rate limiting middleware (10 requests per 60 seconds per IP)
+# Rate limiting middleware (configurable via settings)
 app.add_middleware(
     RateLimitMiddleware,
-    requests_per_window=10,
-    window_seconds=60,
+    requests_per_window=settings.rate_limit_requests,
+    window_seconds=settings.rate_limit_window,
     exclude_paths=["/health", "/docs", "/openapi.json"]
 )
 
@@ -69,8 +70,7 @@ def get_rag_engine() -> RAGEngine:
     """Get or initialize RAG engine"""
     global rag_engine
     if rag_engine is None:
-        persist_dir = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma")
-        rag_engine = RAGEngine(persist_dir=persist_dir)
+        rag_engine = RAGEngine(persist_dir=settings.chroma_persist_dir)
     return rag_engine
 
 
@@ -88,12 +88,11 @@ async def health_check():
 
     # Test Ollama connection
     ollama_status = "unknown"
-    ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
     ollama_models = []
     try:
         import httpx
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{os.getenv('OLLAMA_HOST', 'http://localhost:11434')}/api/tags", timeout=5.0)
+            response = await client.get(f"{settings.ollama_host}/api/tags", timeout=5.0)
             if response.status_code == 200:
                 ollama_status = "connected"
                 ollama_models = [m.get("name") for m in response.json().get("models", [])]
@@ -107,8 +106,8 @@ async def health_check():
         "status": "healthy",
         "api_available": api_healthy,
         "ollama_status": ollama_status,
-        "ollama_host": os.getenv("OLLAMA_HOST", "http://localhost:11434"),
-        "ollama_model": ollama_model,
+        "ollama_host": settings.ollama_host,
+        "ollama_model": settings.ollama_model,
         "available_models": ollama_models
     }
 
@@ -118,14 +117,12 @@ async def test_ollama():
     """Test Ollama LLM connection and generate a simple response"""
     try:
         engine = get_rag_engine()
-        
-        # Simple test query without RAG context
         test_response = engine.llm.invoke("Say hello, this is a test.")
-        
+
         return {
             "success": True,
-            "ollama_host": os.getenv("OLLAMA_HOST", "http://localhost:11434"),
-            "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"),
+            "ollama_host": settings.ollama_host,
+            "model": settings.ollama_model,
             "response": test_response,
             "message": "Ollama LLM is working correctly!"
         }
@@ -285,13 +282,13 @@ async def get_conversation_stats():
 
 
 if __name__ == "__main__":
-    host = os.getenv("APP_HOST", "0.0.0.0")
-    port = int(os.getenv("APP_PORT", "3030"))
-    debug = os.getenv("DEBUG", "false").lower() == "true"
-
+    logger.info(f"Starting SBN ChatAgent on {settings.app_host}:{settings.app_port}")
+    logger.info(f"Log level: {settings.log_level}")
+    logger.info(f"Debug mode: {settings.debug}")
+    
     uvicorn.run(
         "app:app",
-        host=host,
-        port=port,
-        reload=debug
+        host=settings.app_host,
+        port=settings.app_port,
+        reload=settings.debug
     )

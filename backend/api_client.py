@@ -9,8 +9,10 @@ from typing import Optional, Dict, Any, List
 
 try:
     from .models import Product
+    from .config import settings
 except ImportError:
     from models import Product
+    from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +21,8 @@ class InternalAPIClient:
     """Client for internal company APIs"""
 
     def __init__(self):
-        self.base_url = os.getenv("INTERNAL_API_URL", "http://localhost:8000")
-        self.timeout = 10.0  # Reduced timeout
+        self.base_url = settings.internal_api_url
+        self.timeout = settings.internal_api_timeout
 
     async def _get_headers(self) -> Dict[str, str]:
         """Get request headers"""
