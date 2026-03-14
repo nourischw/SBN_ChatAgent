@@ -17,12 +17,14 @@ try:
     from .rag_engine import RAGEngine
     from .logging_config import setup_logging
     from .conversation_manager import conversation_manager
+    from .validators import validate_chat_request, sanitize_text, validate_conversation_id
 except ImportError:
     from models import ChatRequest, ChatResponse, QueryResponse, Product
     from api_client import InternalAPIClient
     from rag_engine import RAGEngine
     from logging_config import setup_logging
     from conversation_manager import conversation_manager
+    from validators import validate_chat_request, sanitize_text
 
 # Setup logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -134,12 +136,25 @@ async def chat(request: ChatRequest):
     conversation_id = request.conversation_id or "default"
     logger.info(f"Chat request received: conversation_id={conversation_id}, message_length={len(request.message)}")
     
+    # Validate input
+    is_valid, error_msg = validate_chat_request(
+        message=request.message,
+        conversation_id=conversation_id,
+        history_limit=request.history_limit
+    )
+    if not is_valid:
+        logger.warning(f"Invalid chat request: {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Sanitize message
+    sanitized_message = sanitize_text(request.message)
+    
     try:
         # Add user message to history
         conversation_manager.add_message(
             conversation_id=conversation_id,
             role="user",
-            content=request.message
+            content=sanitized_message
         )
 
         # Get conversation history if requested
@@ -153,7 +168,7 @@ async def chat(request: ChatRequest):
 
         # Query RAG engine
         engine = get_rag_engine()
-        result = engine.query(request.message, context_history=context_history)
+        result = engine.query(sanitized_message, context_history=context_history)
 
         # Add assistant response to history
         conversation_manager.add_message(
@@ -236,7 +251,27 @@ async def clear_vector_store():
         engine.clear_vector_store()
         return {"success": True, "message": "Vector store cleared"}
     except Exception as e:
+        logger.exception(f"Error clearing vector store: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def clear_conversation(conversation_id: str):
+    """Clear a specific conversation history"""
+    is_valid, error_msg = validate_conversation_id(conversation_id)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    success = conversation_manager.clear_conversation(conversation_id)
+    if success:
+        return {"success": True, "message": f"Conversation {conversation_id} cleared"}
+    raise HTTPException(status_code=404, detail="Conversation not found")
+
+
+@app.get("/api/conversations/stats")
+async def get_conversation_stats():
+    """Get conversation manager statistics"""
+    return conversation_manager.get_stats()
 
 
 if __name__ == "__main__":
