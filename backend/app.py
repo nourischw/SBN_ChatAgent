@@ -18,6 +18,7 @@ try:
     from .logging_config import setup_logging
     from .conversation_manager import conversation_manager
     from .validators import validate_chat_request, sanitize_text, validate_conversation_id
+    from .rate_limiter import RateLimitMiddleware
 except ImportError:
     from models import ChatRequest, ChatResponse, QueryResponse, Product
     from api_client import InternalAPIClient
@@ -25,6 +26,7 @@ except ImportError:
     from logging_config import setup_logging
     from conversation_manager import conversation_manager
     from validators import validate_chat_request, sanitize_text
+    from rate_limiter import RateLimitMiddleware
 
 # Setup logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -45,6 +47,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Rate limiting middleware (10 requests per 60 seconds per IP)
+app.add_middleware(
+    RateLimitMiddleware,
+    requests_per_window=10,
+    window_seconds=60,
+    exclude_paths=["/health", "/docs", "/openapi.json"]
 )
 
 # Initialize components
