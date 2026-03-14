@@ -3,7 +3,8 @@ SBN ChatAgent - FastAPI Backend
 AI chat agent with RAG and internal API integration
 """
 import os
-from fastapi import FastAPI, HTTPException
+import logging
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -14,10 +15,17 @@ try:
     from .models import ChatRequest, ChatResponse, QueryResponse, Product
     from .api_client import InternalAPIClient
     from .rag_engine import RAGEngine
+    from .logging_config import setup_logging
 except ImportError:
     from models import ChatRequest, ChatResponse, QueryResponse, Product
     from api_client import InternalAPIClient
     from rag_engine import RAGEngine
+    from logging_config import setup_logging
+
+# Setup logging
+log_level = os.getenv("LOG_LEVEL", "INFO")
+setup_logging(log_level=log_level)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -61,26 +69,26 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    logger.info("Health check requested")
     api_healthy = await api_client.health_check()
-    
+
     # Test Ollama connection
     ollama_status = "unknown"
     ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
+    ollama_models = []
     try:
         import httpx
         async with httpx.AsyncClient() as client:
             response = await client.get(f"{os.getenv('OLLAMA_HOST', 'http://localhost:11434')}/api/tags", timeout=5.0)
             if response.status_code == 200:
                 ollama_status = "connected"
-                models = response.json().get("models", [])
-                ollama_models = [m.get("name") for m in models]
+                ollama_models = [m.get("name") for m in response.json().get("models", [])]
             else:
                 ollama_status = "error"
-                ollama_models = []
     except Exception as e:
+        logger.error(f"Ollama health check failed: {e}")
         ollama_status = f"disconnected: {str(e)}"
-        ollama_models = []
-    
+
     return {
         "status": "healthy",
         "api_available": api_healthy,
@@ -121,30 +129,32 @@ async def chat(request: ChatRequest):
     Chat endpoint - Process user message and return AI response
     Uses RAG with Ollama LLM for intelligent responses based on product data
     """
+    logger.info(f"Chat request received: conversation_id={request.conversation_id}, message_length={len(request.message)}")
     try:
         engine = get_rag_engine()
         result = engine.query(request.message)
 
+        logger.info(f"Chat response generated: {len(result.get('answer', ''))} chars")
         return ChatResponse(
             response=result["answer"],
             conversation_id=request.conversation_id or "default",
             sources=result.get("sources")
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Chat endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error processing chat request: {str(e)}")
 
 
 @app.get("/api/products", response_model=QueryResponse)
 async def get_products():
     """Fetch product list from internal API and add to RAG system"""
-    import logging
-    logging.info("=== /api/products endpoint called ===")
+    logger.info("=== /api/products endpoint called ===")
     try:
-        logging.info(f"INTERNAL_API_URL: {api_client.base_url}")
+        logger.info(f"INTERNAL_API_URL: {api_client.base_url}")
         # Fetch products from internal API
-        logging.info("Calling api_client.get_product_list()...")
+        logger.info("Calling api_client.get_product_list()...")
         products = await api_client.get_product_list()
-        logging.info(f"Got {len(products)} products")
+        logger.info(f"Got {len(products)} products")
 
         # Convert to dict format for RAG
         product_data = [p.model_dump() for p in products]
@@ -153,15 +163,14 @@ async def get_products():
         engine = get_rag_engine()
         engine.add_product_data(product_data)
 
+        logger.info(f"Successfully added {len(products)} products to RAG knowledge base")
         return QueryResponse(
             success=True,
             data=product_data,
             message=f"Retrieved {len(products)} products and added to knowledge base"
         )
     except Exception as e:
-        import traceback
-        logging.error(f"Error in /api/products: {str(e)}")
-        logging.error(traceback.format_exc())
+        logger.exception(f"Error in /api/products: {str(e)}")
         return QueryResponse(
             success=False,
             data=[],

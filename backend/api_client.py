@@ -4,12 +4,15 @@ Handles communication with company's internal APIs
 """
 import httpx
 import os
+import logging
 from typing import Optional, Dict, Any, List
 
 try:
     from .models import Product
 except ImportError:
     from models import Product
+
+logger = logging.getLogger(__name__)
 
 
 class InternalAPIClient:
@@ -35,9 +38,9 @@ class InternalAPIClient:
             params = {"Lang": lang, "Currency": currency}
             headers = await self._get_headers()
 
-            print(f"[API Client] Fetching products from: {self.base_url}/api/products")
-            print(f"[API Client] Headers: {headers}")
-            print(f"[API Client] Params: {params}")
+            logger.debug(f"Fetching products from: {self.base_url}/api/products")
+            logger.debug(f"Headers: {headers}")
+            logger.debug(f"Params: {params}")
 
             try:
                 response = await client.get(
@@ -46,32 +49,31 @@ class InternalAPIClient:
                     params=params,
                     timeout=self.timeout
                 )
-                print(f"[API Client] Response status: {response.status_code}")
-                print(f"[API Client] Response body: {response.text[:500]}")
+                logger.debug(f"Response status: {response.status_code}")
                 response.raise_for_status()
                 data = response.json()
 
                 # Handle different response formats
                 if isinstance(data, list):
                     products = [Product(**item) for item in data]
-                    print(f"[API Client] Parsed {len(products)} products (list format)")
+                    logger.info(f"Parsed {len(products)} products (list format)")
                     return products
                 elif isinstance(data, dict) and "data" in data:
                     products = [Product(**item) for item in data["data"]]
-                    print(f"[API Client] Parsed {len(products)} products (data field)")
+                    logger.info(f"Parsed {len(products)} products (data field)")
                     return products
                 elif isinstance(data, dict) and "items" in data:
                     products = [Product(**item) for item in data["items"]]
-                    print(f"[API Client] Parsed {len(products)} products (items field)")
+                    logger.info(f"Parsed {len(products)} products (items field)")
                     return products
                 else:
-                    print(f"[API Client] Unknown response format: {type(data)}")
+                    logger.warning(f"Unknown response format: {type(data)}")
                     return []
             except httpx.HTTPError as e:
-                print(f"[API Client] HTTP Error fetching product list: {e}")
+                logger.error(f"HTTP Error fetching product list: {e}")
                 return []
             except Exception as e:
-                print(f"[API Client] Unexpected error: {e}")
+                logger.error(f"Unexpected error fetching product list: {e}")
                 return []
 
     async def health_check(self) -> bool:
