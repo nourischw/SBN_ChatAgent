@@ -3,6 +3,7 @@ RAG Engine for SBN ChatAgent
 Implements Retrieval-Augmented Generation using Ollama LLM
 """
 import os
+import logging
 from typing import List, Optional, Dict, Any
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
@@ -11,6 +12,8 @@ from langchain_community.llms import Ollama
 from langchain.schema import Document
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
+
+logger = logging.getLogger(__name__)
 
 
 class RAGEngine:
@@ -76,22 +79,44 @@ Answer: """
         self.vector_store.add_documents(chunks)
         self.vector_store.persist()
 
-    def query(self, question: str) -> Dict[str, Any]:
-        """Query the RAG system"""
+    def query(self, question: str, context_history: str = "") -> Dict[str, Any]:
+        """
+        Query the RAG system.
+        
+        Args:
+            question: User's question
+            context_history: Optional conversation history to include in context
+            
+        Returns:
+            Dictionary with answer and sources
+        """
         try:
-            result = self.qa_chain.invoke({"query": question})
+            # Build context with RAG retrieval and conversation history
+            retrieved_docs = self.vector_store.similarity_search(question, k=5)
+            rag_context = "\n\n".join([doc.page_content for doc in retrieved_docs])
+            
+            # Combine RAG context with conversation history
+            full_context = rag_context
+            if context_history:
+                full_context = f"Previous Conversation:\n{context_history}\n\nProduct Context:\n{rag_context}"
+
+            # Build prompt with full context
+            prompt = self.prompt_template.format(context=full_context, question=question)
+            
+            # Generate response
+            response = self.llm.invoke(prompt)
 
             # Extract source documents
             sources = []
-            if "source_documents" in result:
-                for doc in result["source_documents"]:
-                    sources.append(doc.page_content[:200] + "...")
+            for doc in retrieved_docs:
+                sources.append(doc.page_content[:200] + "...")
 
             return {
-                "answer": result.get("result", ""),
+                "answer": response,
                 "sources": sources
             }
         except Exception as e:
+            logger.error(f"Query error: {e}")
             return {
                 "answer": f"Error processing query: {str(e)}",
                 "sources": []

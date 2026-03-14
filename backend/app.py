@@ -16,11 +16,13 @@ try:
     from .api_client import InternalAPIClient
     from .rag_engine import RAGEngine
     from .logging_config import setup_logging
+    from .conversation_manager import conversation_manager
 except ImportError:
     from models import ChatRequest, ChatResponse, QueryResponse, Product
     from api_client import InternalAPIClient
     from rag_engine import RAGEngine
     from logging_config import setup_logging
+    from conversation_manager import conversation_manager
 
 # Setup logging
 log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -129,16 +131,50 @@ async def chat(request: ChatRequest):
     Chat endpoint - Process user message and return AI response
     Uses RAG with Ollama LLM for intelligent responses based on product data
     """
-    logger.info(f"Chat request received: conversation_id={request.conversation_id}, message_length={len(request.message)}")
+    conversation_id = request.conversation_id or "default"
+    logger.info(f"Chat request received: conversation_id={conversation_id}, message_length={len(request.message)}")
+    
     try:
-        engine = get_rag_engine()
-        result = engine.query(request.message)
+        # Add user message to history
+        conversation_manager.add_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=request.message
+        )
 
-        logger.info(f"Chat response generated: {len(result.get('answer', ''))} chars")
+        # Get conversation history if requested
+        context_history = ""
+        if request.include_history:
+            context_history = conversation_manager.get_formatted_history(
+                conversation_id,
+                limit=request.history_limit
+            )
+            logger.debug(f"Including {request.history_limit} messages of history")
+
+        # Query RAG engine
+        engine = get_rag_engine()
+        result = engine.query(request.message, context_history=context_history)
+
+        # Add assistant response to history
+        conversation_manager.add_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=result["answer"],
+            sources=result.get("sources")
+        )
+
+        # Get conversation stats
+        conv_stats = conversation_manager.get_stats()
+        msg_count = len(conv_stats.get("messages_per_conversation", {}).get(conversation_id, 0))
+
+        logger.info(f"Chat response generated: {len(result.get('answer', ''))} chars, conversation messages: {msg_count}")
+        
         return ChatResponse(
             response=result["answer"],
-            conversation_id=request.conversation_id or "default",
-            sources=result.get("sources")
+            conversation_id=conversation_id,
+            sources=result.get("sources"),
+            history_included=request.include_history,
+            message_count=msg_count
         )
     except Exception as e:
         logger.exception(f"Chat endpoint error: {e}")
