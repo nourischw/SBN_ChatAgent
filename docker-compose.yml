@@ -3,32 +3,51 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: sbn-chatagent-backend
     ports:
       - "3030:3030"
     environment:
       - OLLAMA_HOST=http://host.docker.internal:11434
-      - INTERNAL_API_URL=http://host.docker.internal:8000
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - OLLAMA_MODEL=qwen2.5:0.5b
+      - INTERNAL_API_URL=http://host.docker.internal:8000/api/products
+      - INTERNAL_API_TIMEOUT=10.0
       - CHROMA_PERSIST_DIR=/app/data/chroma
       - APP_HOST=0.0.0.0
       - APP_PORT=3030
+      - LOG_LEVEL=INFO
+      - DEBUG=false
+      - RATE_LIMIT_REQUESTS=10
+      - RATE_LIMIT_WINDOW=60
+      - MAX_CONVERSATION_HISTORY=10
+      - MAX_MESSAGE_LENGTH=2000
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - chatagent-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3030/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    container_name: sbn-chatagent-frontend
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - chatagent-network
+    restart: unless-stopped
 
 networks:
   chatagent-network:
